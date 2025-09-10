@@ -13,6 +13,7 @@ import threading
 import keyring
 from time import sleep
 import platform
+from packaging import version
 
 # PyGObject
 
@@ -101,7 +102,7 @@ def menu():
 
     commands = [
         ("About althea", on_abtdlg),
-        ("Settings", lambda x: openwindow(SettingsWindow)),
+        #("Settings", lambda x: openwindow(SettingsWindow)),
         ("Install AltStore", altstoreinstall),
         ("Install an IPA file", altserverfile),
         ("Pair", lambda x: openwindow(PairWindow)),
@@ -167,10 +168,26 @@ def paircheck():  # Check if the device is paired already
         return True
 
 def altstoreinstall(_):
-    if paircheck():
-        openwindow(PairWindow)
+    if version.parse(ios_version()) < version.parse("15.0"):
+        global Warnmsg
+        Warnmsg = f"""\niOS {ios_version()} is not supported by AltStore.\nThe lowest supported version is iOS 15.0.\nYou can still continue, but errors may occur.\n"""
+        ios_dialog = WarningDialog(parent=None)
+        ios_dialog.set_position(Gtk.WindowPosition.CENTER_ALWAYS)
+        ios_response = ios_dialog.run()
+        if ios_response == Gtk.ResponseType.OK:
+            ios_dialog.destroy()
+            if paircheck():
+                openwindow(PairWindow)
+            else:
+                win1()
+        elif ios_response == Gtk.ResponseType.CANCEL:
+            ios_dialog.destroy()
     else:
-        win1()
+        if paircheck():
+            openwindow(PairWindow)
+        else:
+            win1()
+
 
 def altserverfile(_):
     if paircheck():
@@ -265,15 +282,21 @@ def use_saved_credentials():
     dialog.destroy()
 
 def win1():
-    if keyring.get_password("althea", "apple_id"):
-        use_saved_credentials()
-    else:
+    try:
+        if keyring.get_password("althea", "apple_id"):
+            use_saved_credentials()
+        else:
+            openwindow(Login)
+    except keyring.errors.KeyringError:
         openwindow(Login)
 
 def win2(_):
-    if keyring.get_password("althea", "apple_id"):
-        use_saved_credentials()
-    else:
+    try:
+        if keyring.get_password("althea", "apple_id"):
+            use_saved_credentials()
+        else:
+            openwindow(Login)
+    except keyring.errors.KeyringError:
         openwindow(Login)
 
 def actionCallback(notification, action, user_data=None):
@@ -522,23 +545,26 @@ class Login(Gtk.Window):
 
     def on_click_me_clicked(self, button):
         silent_remove(f"{(altheapath)}/log.txt")
-        if not keyring.get_password("althea", "apple_id"):
-            self.set_position(Gtk.WindowPosition.CENTER_ALWAYS)
-            dialog = Gtk.MessageDialog(
-                transient_for=self,
-                flags=0,
-                message_type=Gtk.MessageType.QUESTION,
-                buttons=Gtk.ButtonsType.YES_NO,
-                text="Do you want to save your login and password?",
-            )
-            dialog.format_secondary_text("This will allow you to login automatically.")
-            response = dialog.run()
-            if response == Gtk.ResponseType.YES:
-                apple_id = self.entry1.get_text().lower()
-                password = self.entry.get_text()
-                keyring.set_password("althea", "apple_id", apple_id)
-                keyring.set_password("althea", "password", password)
-            dialog.destroy()
+        try:
+            if not keyring.get_password("althea", "apple_id"):
+                self.set_position(Gtk.WindowPosition.CENTER_ALWAYS)
+                dialog = Gtk.MessageDialog(
+                    transient_for=self,
+                    flags=0,
+                    message_type=Gtk.MessageType.QUESTION,
+                    buttons=Gtk.ButtonsType.YES_NO,
+                    text="Do you want to save your login and password?",
+                )
+                dialog.format_secondary_text("This will allow you to login automatically.")
+                response = dialog.run()
+                if response == Gtk.ResponseType.YES:
+                    apple_id = self.entry1.get_text().lower()
+                    password = self.entry.get_text()
+                    keyring.set_password("althea", "apple_id", apple_id)
+                    keyring.set_password("althea", "password", password)
+                dialog.destroy()
+        except keyring.errors.KeyringError:
+            pass
         self.entry.set_progress_pulse_step(0.2)
         # Call self.do_pulse every 100 ms
         self.timeout_id = GLib.timeout_add(100, self.do_pulse, None)
