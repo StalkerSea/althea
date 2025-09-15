@@ -24,7 +24,7 @@ sudo apt-get install binutils python3-pip python3-requests python3-keyring git g
 
 Fedora:
 ```
-sudo dnf install binutils python3-pip python3-requests python3-keyring git libappindicator-gtk3 usbmuxd libimobiledevice-devel libimobiledevice-utils wget curl avahi-compat-libdns_sd-devel dnf-plugins-core unzip usbutils psmisc
+sudo dnf install binutils python3-pip python3-requests python3-keyring git libappindicator-gtk3 usbmuxd libimobiledevice-devel libimobiledevice-utils wget curl avahi-compat-libdns_sd-devel dnf-plugins-core unzip usbutils psmisc libhandy1-devel
 ```
 Arch Linux:
 ```
