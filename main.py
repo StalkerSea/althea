@@ -39,19 +39,20 @@ installedcheck = False
 computer_cpu_platform = platform.machine()
 
 def resource_path(relative_path):
-    global installedcheck
-    CheckRun10 = subprocess.run(
-        f"find /usr/lib/althea/althea > /dev/null 2>&1", shell=True
-    )
-    if CheckRun10.returncode == 0:
-        installedcheck = True
-        base_path = "/usr/lib/althea"
-    else:
-        base_path = os.path.abspath(".")
-    return os.path.join(base_path, relative_path)
+    """Return an absolute path for bundled resources.
 
-    installedcheck = subprocess.run("test -e /usr/lib/althea/althea", shell=True).returncode == 0
-    base_path = "/usr/lib/althea" if installedcheck else os.path.abspath(".")
+    Falls back to the directory containing this file when not installed
+    system-wide so it does not depend on the current working directory.
+    """
+    global installedcheck
+    system_base = "/usr/lib/althea"
+    if os.path.exists(os.path.join(system_base, "althea")):
+        installedcheck = True
+        base_path = system_base
+    else:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+
+    return os.path.join(base_path, relative_path)
 
 
 # Global variables
@@ -387,7 +388,7 @@ class SplashScreen(Handy.Window):
         self.add(self.mainBox)
 
         pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(
-            filename=os.path.join("resources/4.png"),
+            filename=resource_path("resources/4.png"),
             width=512,
             height=288,
             preserve_aspect_ratio=False,

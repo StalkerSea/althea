@@ -51,7 +51,83 @@ cd althea
 python3 main.py
 ```
 
+Tip: use a local venv with uv to keep system packages untouched:
+```bash
+uv venv .venv
+uv pip install -r requirements.txt
+source .venv/bin/activate
+python main.py
+```
+
 That's it! Have fun with althea!
+
+### Run althea with a systemd user service (recommended)
+
+This keeps althea running even without a logged-in GUI. Replace `/path/to/althea` with the absolute path to your cloned repo.
+
+One-time setup:
+```bash
+mkdir -p ~/.config/systemd/user
+cat > ~/.config/systemd/user/althea.service <<'EOF'
+[Unit]
+Description=Althea AltServer tray
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/path/to/althea/.venv/bin/python /path/to/althea/main.py  # or /usr/bin/python if you skip the venv
+WorkingDirectory=/path/to/althea
+Restart=on-failure
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=%h/.Xauthority
+
+[Install]
+WantedBy=default.target
+EOF
+systemctl --user daemon-reload
+systemctl --user enable --now althea.service
+```
+
+Optional: keep running after logout (enable lingering):
+```bash
+loginctl enable-linger "$(whoami)"
+```
+
+Useful commands:
+```bash
+systemctl --user status althea.service
+journalctl --user -u althea.service -f
+systemctl --user stop althea.service
+systemctl --user restart althea.service
+```
+
+### Run althea on desktop login (autostart)
+
+Starts when you log into your desktop session.
+
+One-time setup:
+```bash
+mkdir -p ~/.config/autostart
+cat > ~/.config/autostart/althea.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=althea
+Exec=/usr/bin/python /path/to/althea/main.py
+X-GNOME-Autostart-enabled=true
+EOF
+```
+Add OnlyShowIn or other keys if your DE requires them.
+
+Test it now:
+```bash
+/usr/bin/python /home/luazu/iOS/althea/main.py
+```
+
+Disable autostart:
+```bash
+rm -f ~/.config/autostart/althea.desktop
+```
 
 ## FAQ
 

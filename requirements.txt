@@ -1,3 +1,4 @@
 pygobject
 requests
 keyring
+packaging
