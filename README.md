@@ -119,9 +119,9 @@ EOF
 ```
 Add OnlyShowIn or other keys if your DE requires them.
 
-Test it now:
+Test it:
 ```bash
-/usr/bin/python /home/luazu/iOS/althea/main.py
+/usr/bin/python /path/to/althea/main.py
 ```
 
 Disable autostart:
