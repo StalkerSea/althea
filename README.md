@@ -68,22 +68,32 @@ This keeps althea running even without a logged-in GUI. Replace `/path/to/althea
 One-time setup:
 ```bash
 mkdir -p ~/.config/systemd/user
+# import your current session env so GTK can reach the display/dbus
+systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XAUTHORITY DBUS_SESSION_BUS_ADDRESS XDG_RUNTIME_DIR
+# check what display backend you use (prints x11 or wayland)
+echo "$XDG_SESSION_TYPE"
 cat > ~/.config/systemd/user/althea.service <<'EOF'
 [Unit]
 Description=Althea AltServer tray
-After=network-online.target
-Wants=network-online.target
+After=graphical-session.target
+Wants=graphical-session.target
+PartOf=graphical-session.target
 
 [Service]
 Type=simple
 ExecStart=/path/to/althea/.venv/bin/python /path/to/althea/main.py  # or /usr/bin/python if you skip the venv
 WorkingDirectory=/path/to/althea
 Restart=on-failure
-Environment=DISPLAY=:0
+# carry the session env needed by GTK and dbus
+PassEnvironment=DISPLAY WAYLAND_DISPLAY XAUTHORITY DBUS_SESSION_BUS_ADDRESS XDG_RUNTIME_DIR
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%U/bus
+# set your display backend; if the check above prints "wayland", use wayland here or drop the line
+Environment=GDK_BACKEND=x11
 Environment=XAUTHORITY=%h/.Xauthority
 
 [Install]
-WantedBy=default.target
+WantedBy=graphical-session.target
 EOF
 systemctl --user daemon-reload
 systemctl --user enable --now althea.service
