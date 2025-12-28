@@ -61,9 +61,9 @@ python main.py
 
 That's it! Have fun with althea!
 
-### Run althea with a systemd user service (recommended)
+### Run althea with a systemd user service (optional)
 
-This keeps althea running even without a logged-in GUI. Replace `/path/to/althea` with the absolute path to your cloned repo.
+Use this only if you really need a user service. If it breaks your launcher or tray, use the desktop autostart below instead. Replace `/path/to/althea` with the absolute path to your cloned repo.
 
 One-time setup:
 ```bash
@@ -99,6 +99,8 @@ systemctl --user daemon-reload
 systemctl --user enable --now althea.service
 ```
 
+If the service crashes your launcher/tray: ensure you are logged in (no lingering), re-run `dbus-update-activation-environment --systemd --all`, drop `Environment=GDK_BACKEND=x11` on Wayland, or prefer the desktop autostart method below.
+
 Optional: keep running after logout (enable lingering):
 ```bash
 loginctl enable-linger "$(whoami)"
@@ -123,13 +125,19 @@ cat > ~/.config/autostart/althea.desktop <<'EOF'
 [Desktop Entry]
 Type=Application
 Name=althea
-Exec=/usr/bin/python /path/to/althea/main.py
+Exec=/path/to/althea/.venv/bin/python /path/to/althea/main.py
 X-GNOME-Autostart-enabled=true
 EOF
 ```
 Add OnlyShowIn or other keys if your DE requires them.
 
-Test it:
+Test it quickly (Wayland/X11):
+```bash
+install -D ~/.config/autostart/althea.desktop ~/.local/share/applications/althea.desktop
+gtk-launch althea
+```
+
+Or just run it directly:
 ```bash
 /usr/bin/python /path/to/althea/main.py
 ```
