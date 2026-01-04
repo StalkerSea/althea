@@ -14,3 +14,4 @@ log.txt
 old
 traybackup.py
 .directory
+/__pycache__

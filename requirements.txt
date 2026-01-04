@@ -2,3 +2,5 @@ pygobject
 requests
 keyring
 packaging
+pymobiledevice3
+psutil

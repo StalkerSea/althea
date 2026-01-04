@@ -61,6 +61,32 @@ python main.py
 
 That's it! Have fun with althea!
 
+## Wi-Fi refresh / network mode
+
+althea can use devices connected over USB and (when available) over Wi-Fi. On Linux, Wi‑Fi support depends on `libimobiledevice` being able to see your iPhone via network discovery.
+
+### Verify Wi‑Fi discovery works
+
+1. Ensure your iPhone and Linux PC are on the same LAN.
+2. Pair once over USB and accept the Trust prompt.
+3. Unplug USB and run:
+
+```bash
+idevice_id -n -l
+```
+
+If this prints your device UDID, Wi‑Fi connectivity is available and althea can use it.
+
+### If `idevice_id -n -l` shows nothing
+
+- Ensure `usbmuxd` is running: `systemctl status usbmuxd`
+- Ensure mDNS discovery works: `avahi-browse -rt _apple-mobdev2._tcp`
+- Ensure your firewall allows mDNS (UDP 5353) and iOS device services on your LAN.
+
+Some iOS setups require enabling “Sync with this iPhone over Wi‑Fi” once using macOS Finder or Windows iTunes. After that, network discovery on Linux typically starts returning the UDID.
+
+If you use Docker/VM networking, make sure your LAN interface is preferred for routes to your phone (Docker bridge routes can interfere with discovery/connectivity).
+
 ### Run althea with a systemd user service (optional)
 
 Use this only if you really need a user service. If it breaks your launcher or tray, use the desktop autostart below instead. Replace `/path/to/althea` with the absolute path to your cloned repo.
