@@ -21,131 +21,48 @@ from packaging import version
 import psutil
 import logging
 
-# PyGObject
+from althea_app.gi import (
+    Gtk,
+    GLib,
+    GObject,
+    Handy,
+    GdkPixbuf,
+    Notify,
+    Gdk,
+    Pango,
+    appindicator,
+)
 
-import gi
-
-gi.require_version("Gtk", "3.0")
-gi.require_version("Handy", "1")
-gi.require_version("Notify", "0.7")
-try:
-    gi.require_version("AppIndicator3", "0.1")
-    from gi.repository import Gtk, AppIndicator3 as appindicator
-except ValueError:  # Fix for Solus and other Ayatana users
-    gi.require_version("AyatanaAppIndicator3", "0.1")
-    from gi.repository import Gtk, AyatanaAppIndicator3 as appindicator
-from gi.repository import GLib
-from gi.repository import GObject, Handy
-from gi.repository import GdkPixbuf
-from gi.repository import Notify
-from gi.repository import Gdk
-from gi.repository import Pango
-
-GObject.type_ensure(Handy.ActionRow)
-
-installedcheck = False
-computer_cpu_platform = platform.machine()
-
-
-DEFAULT_SETTINGS = {
-    # "window_and_tray" (default): open main window + tray indicator
-    # "tray_only": start in tray (no main window)
-    "startup_mode": "window_and_tray",
-}
-
-
-SETTINGS = dict(DEFAULT_SETTINGS)
-
-
-logger = logging.getLogger("althea")
-
-
-def get_connected_udid():
-    """Return a single device UDID, preferring USB and falling back to network.
-
-    Note: `idevice_id -l` can list devices even before they are trusted/paired.
-    Avoid requiring `ideviceinfo` here, otherwise we incorrectly report "no device".
-    """
-    return get_connected_device().get("udid", "")
-
-
-def get_connected_device():
-    """Return {udid, transport} where transport is 'usb' | 'network' | 'none'."""
-    # Prefer USB via default usbmuxd.
-    try:
-        log_info("get_connected_device: running idevice_id -l")
-        out = subprocess.check_output(["idevice_id", "-l"], stderr=subprocess.STDOUT)
-        udids = [
-            line.strip()
-            for line in out.decode(errors="replace").splitlines()
-            if line.strip()
-        ]
-        if udids:
-            log_info(f"get_connected_device: usb udids={udids}")
-            return {"udid": udids[0], "transport": "usb"}
-    except subprocess.CalledProcessError as e:
-        log_info(f"get_connected_device: idevice_id -l failed rc={e.returncode}")
-    except Exception as e:
-        log_info(f"get_connected_device: idevice_id -l failed: {e!r}")
-
-    # Fallback to network via netmuxd.
-    try:
-        env = os.environ.copy()
-        env["USBMUXD_SOCKET_ADDRESS"] = "127.0.0.1:27015"
-        log_info("get_connected_device: running idevice_id -n -l (via netmuxd)")
-        out = subprocess.check_output(
-            ["idevice_id", "-n", "-l"], env=env, stderr=subprocess.STDOUT
-        )
-        udids = [
-            line.strip()
-            for line in out.decode(errors="replace").splitlines()
-            if line.strip()
-        ]
-        if udids:
-            log_info(f"get_connected_device: network udids={udids}")
-            return {"udid": udids[0], "transport": "network"}
-    except subprocess.CalledProcessError as e:
-        log_info(f"get_connected_device: idevice_id -n -l failed rc={e.returncode}")
-    except Exception as e:
-        log_info(f"get_connected_device: idevice_id -n -l failed: {e!r}")
-
-    return {"udid": "", "transport": "none"}
-
-
-def get_network_udid():
-    """Return a device UDID specifically from network connection."""
-    try:
-        env = os.environ.copy()
-        env["USBMUXD_SOCKET_ADDRESS"] = "127.0.0.1:27015"
-        log_info("get_network_udid: running idevice_id -n -l")
-        out = subprocess.check_output(
-            ["idevice_id", "-n", "-l"], env=env, stderr=subprocess.STDOUT
-        )
-        udids = [
-            line.strip()
-            for line in out.decode(errors="replace").splitlines()
-            if line.strip()
-        ]
-        if udids:
-            log_info(f"get_network_udid: candidates={udids}")
-            return udids[0]
-    except subprocess.CalledProcessError:
-        pass
-
-    return ""
-
-
-def resource_path(relative_path):
-    """Return an absolute path for bundled resources."""
-    global installedcheck
-    system_base = "/usr/lib/althea"
-    if os.path.exists(os.path.join(system_base, "althea")):
-        installedcheck = True
-        base_path = system_base
-    else:
-        base_path = os.path.dirname(os.path.abspath(__file__))
-
-    return os.path.join(base_path, relative_path)
+from althea_app.app_config import (
+    computer_cpu_platform,
+    resource_path,
+    is_installed,
+    altheapath,
+    AltServer,
+    AnisetteServer,
+    Netmuxd,
+    AltStore,
+    AutoStart,
+    log_path as _log_path,
+)
+from althea_app.settings_store import load_settings, save_settings
+from althea_app.logging_utils import setup_logging, log_info, log_exception
+from althea_app.device_utils import get_connected_device, get_connected_udid, get_network_udid
+from althea_app.process_utils import is_process_running, kill_process_by_name
+from althea_app.services import (
+    stop_services,
+    is_anisette_accessible,
+    is_netmuxd_ready,
+    is_altserver_running,
+    start_anisette_server,
+    start_netmuxd,
+    start_altserver,
+    restart_anisette_server,
+    restart_netmuxd,
+    restart_altserver_process,
+    _is_usbmuxd_responsive,
+    restart_lockdownd_service,
+)
 
 
 # Global variables
@@ -155,215 +72,8 @@ InsAltStore = subprocess.Popen(
     "test", stdin=subprocess.PIPE, stdout=subprocess.PIPE, shell=True
 )
 
-def _safe_cmdline_str(proc_info):
-    cmdline = proc_info.get("cmdline")
-    if not cmdline:
-        return ""
-    if isinstance(cmdline, str):
-        return cmdline
-    try:
-        return " ".join(cmdline)
-    except TypeError:
-        return ""
 
-
-def is_process_running(process_name, *, ignore_pid=None):
-    """Check if a process containing `process_name` in its cmdline is running."""
-    for proc in psutil.process_iter(["pid", "name", "cmdline"]):
-        try:
-            if ignore_pid is not None and proc.info.get("pid") == ignore_pid:
-                continue
-            cmdline_str = _safe_cmdline_str(proc.info)
-            if process_name in cmdline_str:
-                return True
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            continue
-    return False
-
-def kill_process_by_name(process_name):
-    """Kill all processes with the given name."""
-    for proc in psutil.process_iter(["pid", "name", "cmdline"]):
-        try:
-            cmdline_str = _safe_cmdline_str(proc.info)
-            if process_name in cmdline_str:
-                proc.kill()
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            continue
-
-
-def stop_services():
-    for needle in (AltServer, AnisetteServer, Netmuxd):
-        try:
-            kill_process_by_name(needle)
-        except Exception:
-            pass
-
-
-def is_anisette_accessible(timeout=0.75):
-    try:
-        with urllib.request.urlopen("http://127.0.0.1:6969", timeout=timeout) as resp:
-            data = resp.read(2048)
-        return b"{" in data
-    except Exception:
-        return False
-
-
-def is_netmuxd_ready(timeout=0.5):
-    try:
-        env = os.environ.copy()
-        env["USBMUXD_SOCKET_ADDRESS"] = "127.0.0.1:27015"
-        proc = subprocess.run(
-            ["idevice_id", "-n", "-l"],
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=timeout,
-        )
-        return proc.returncode == 0
-    except Exception:
-        return False
-
-
-def is_altserver_running():
-    # Match by full path placed in cmdline.
-    return is_process_running(AltServer)
-
-
-def start_anisette_server():
-    if is_anisette_accessible(timeout=0.5):
-        return
-    try:
-        kill_process_by_name(AnisetteServer)
-    except Exception:
-        pass
-    log_info("Starting anisette-server")
-    subprocess.Popen(
-        [AnisetteServer, "-n", "127.0.0.1", "-p", "6969"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-
-
-def start_netmuxd():
-    if is_netmuxd_ready(timeout=0.25):
-        return
-    try:
-        kill_process_by_name(Netmuxd)
-    except Exception:
-        pass
-    log_info("Starting netmuxd")
-    subprocess.Popen(
-        [Netmuxd, "--disable-unix", "--host", "127.0.0.1"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-
-
-def start_altserver():
-    if is_altserver_running():
-        return
-    log_info("Starting AltServer")
-    env = os.environ.copy()
-    env["ALTSERVER_ANISETTE_SERVER"] = "http://127.0.0.1:6969"
-    env["AVAHI_COMPAT_NOWARN"] = "1"
-
-    # If we force USBMUXD_SOCKET_ADDRESS to netmuxd, AltServer may not see USB devices.
-    # Prefer default usbmuxd when any USB device is present; otherwise use netmuxd.
-    try:
-        out = subprocess.check_output(["idevice_id", "-l"], stderr=subprocess.DEVNULL)
-        has_usb = any(line.strip() for line in out.decode(errors="replace").splitlines())
-    except Exception:
-        has_usb = False
-
-    if has_usb:
-        env.pop("USBMUXD_SOCKET_ADDRESS", None)
-        log_info("AltServer env: using default usbmuxd socket (USB present)")
-    else:
-        env["USBMUXD_SOCKET_ADDRESS"] = "127.0.0.1:27015"
-        log_info("AltServer env: using netmuxd socket (no USB devices)")
-
-    subprocess.Popen(
-        [f"{altheapath}/AltServer"],
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-
-
-def restart_anisette_server():
-    log_info("Restart anisette-server requested")
-    start_anisette_server()
-
-
-def restart_netmuxd():
-    log_info("Restart netmuxd requested")
-    start_netmuxd()
-
-
-def restart_altserver_process():
-    log_info("Restart AltServer requested")
-    try:
-        kill_process_by_name(AltServer)
-    except Exception:
-        pass
-    start_altserver()
-
-
-def _is_usbmuxd_responsive(timeout_s: float = 2.0) -> bool:
-    """Best-effort probe that usbmuxd is responding.
-
-    We avoid pairing/lockdownd assumptions by using `idevice_id -l`.
-    """
-    try:
-        proc = subprocess.run(
-            ["idevice_id", "-l"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=timeout_s,
-            check=False,
-        )
-        return proc.returncode == 0
-    except Exception:
-        return False
-
-
-def restart_lockdownd_service():
-    """Restart the host-side services involved in lockdownd communication.
-
-    Many distros do not ship a `lockdownd.service`. When missing, fall back to
-    restarting `usbmuxd`, which is the typical host-side daemon.
-    """
-    log_info("Restart lockdownd requested")
-
-    # Try systemd units in order.
-    units = ["lockdownd", "usbmuxd"]
-    last_out = ""
-    for unit in units:
-        try:
-            proc = subprocess.run(
-                ["systemctl", "restart", unit],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                timeout=6,
-                check=False,
-            )
-            out = (proc.stdout or b"").decode(errors="replace")
-            last_out = out.strip()
-            if proc.returncode == 0:
-                log_info(f"Restart lockdownd: systemctl restart {unit} succeeded")
-                return
-            log_info(
-                f"Restart lockdownd: systemctl restart {unit} failed rc={proc.returncode} output_tail={last_out[-250:]!r}"
-            )
-        except FileNotFoundError:
-            raise RuntimeError("systemctl not found on this system")
-        except subprocess.TimeoutExpired:
-            raise RuntimeError(f"Timed out restarting {unit}")
-
-    # If both units failed, surface a helpful message.
-    if last_out:
-        raise RuntimeError(last_out)
-    raise RuntimeError("Failed to restart lockdownd/usbmuxd")
+SETTINGS = {}
 login_or_file_chooser = "login"
 apple_id = "lol"
 password = "lol"
@@ -373,84 +83,7 @@ icon_name = "changes-prevent-symbolic"
 command_six = Gtk.CheckMenuItem(label="Launch at Login")
 
 # Paths
-altheapath = os.path.join(
-    os.environ.get("XDG_DATA_HOME") or f"{os.environ['HOME']}/.local/share",
-    "althea",
-)
-AltServer = os.path.join(altheapath, "AltServer")
-AnisetteServer = os.path.join(altheapath, "anisette-server")
-Netmuxd = os.path.join(altheapath, "netmuxd")
-AltStore = os.path.join(altheapath, "AltStore.ipa")
 PATH = AltStore
-AutoStart = resource_path("resources/AutoStart.sh")
-
-
-def _settings_path():
-    return os.path.join(altheapath, "config.json")
-
-
-def load_settings():
-    try:
-        path = _settings_path()
-        if not os.path.exists(path):
-            return dict(DEFAULT_SETTINGS)
-        with open(path, "r", encoding="utf-8") as f:
-            raw = json.load(f)
-        settings = dict(DEFAULT_SETTINGS)
-        if isinstance(raw, dict):
-            settings.update(raw)
-        return settings
-    except Exception:
-        return dict(DEFAULT_SETTINGS)
-
-
-def save_settings(settings):
-    os.makedirs(altheapath, exist_ok=True)
-    path = _settings_path()
-    payload = dict(DEFAULT_SETTINGS)
-    if isinstance(settings, dict):
-        payload.update(settings)
-    tmp_path = f"{path}.tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2, sort_keys=True)
-    os.replace(tmp_path, path)
-
-
-def _log_path():
-    return os.path.join(altheapath, "althea.log")
-
-
-def setup_logging():
-    os.makedirs(altheapath, exist_ok=True)
-
-    # Avoid duplicate handlers if main() is called again.
-    if getattr(setup_logging, "_configured", False):
-        return
-
-    logger.setLevel(logging.INFO)
-    handler = logging.FileHandler(_log_path(), encoding="utf-8")
-    formatter = logging.Formatter(
-        fmt="%(asctime)s %(levelname)s %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    logger.propagate = False
-    setup_logging._configured = True
-
-
-def log_info(message):
-    try:
-        logger.info(message)
-    except Exception:
-        pass
-
-
-def log_exception(message):
-    try:
-        logger.exception(message)
-    except Exception:
-        pass
 
 # Environment Exports
 export_anisette = "export ALTSERVER_ANISETTE_SERVER='http://127.0.0.1:6969'"
@@ -501,7 +134,7 @@ def menu():
             menu.append(Gtk.SeparatorMenuItem())
 
     CheckRun11 = subprocess.run(f"test -e /usr/lib/althea/althea", shell=True)
-    if installedcheck:
+    if is_installed():
         global command_six
         CheckRun12 = subprocess.run(
             f"test -e $HOME/.config/autostart/althea.desktop", shell=True
@@ -1012,26 +645,34 @@ class InstallQueueManager:
         args = [AltServer, "-u", udid, "-a", task.apple_id, "-p", task.password, task.ipa_path]
         if any(a is None or a == "" for a in args):
             task.status = InstallTaskStatus.FAILED
-            task.detail = "Missing arguments"
+        log_fp = None
+        proc = None
+        try:
+            log_fp = open(_log_path(), "ab", buffering=0)
+
+            task.detail = "Running…"
+            GLib.idle_add(lambda: self._notify_update(task))
+
+            proc = subprocess.Popen(
+                args,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                env=env,
+                bufsize=1,
+                universal_newlines=True,
+            )
+            task._proc = proc
+        except Exception as e:
+            try:
+                if log_fp is not None:
+                    log_fp.close()
+            except Exception:
+                pass
+            task.status = InstallTaskStatus.FAILED
+            task.detail = f"Failed to start AltServer: {e}"
             GLib.idle_add(lambda: self._notify_update(task))
             return
-
-        os.makedirs(altheapath, exist_ok=True)
-        log_fp = open(_log_path(), "ab", buffering=0)
-
-        task.detail = "Running…"
-        GLib.idle_add(lambda: self._notify_update(task))
-
-        proc = subprocess.Popen(
-            args,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            env=env,
-            bufsize=1,
-            universal_newlines=True,
-        )
-        task._proc = proc
 
         warn_prompt_seen = False
         two_factor_seen = False
@@ -2117,38 +1758,8 @@ class DeviceListWindow(Handy.Window):
         self.populate_devices()
 
     def on_enable_wifi_clicked(self, widget):
-        """
-        Attempts to enable 'Sync over WiFi' using pymobiledevice3.
-        Updated syntax: --state on --udid <UDID>
-        """
-
-        # 1. Get the UDID of the connected USB device
-        udid = ""
-        try:
-            usb_output = subprocess.check_output(
-                ["idevice_id", "-l"], stderr=subprocess.DEVNULL
-            )
-            usb_devices = [
-                u.strip() for u in usb_output.decode().splitlines() if u.strip()
-            ]
-            if usb_devices:
-                udid = usb_devices[0]
-            else:
-                # Try network connection with proper environment
-                env = os.environ.copy()
-                env["USBMUXD_SOCKET_ADDRESS"] = "127.0.0.1:27015"
-                net_output = subprocess.check_output(
-                    ["idevice_id", "-n", "-l"],
-                    env=env,
-                    stderr=subprocess.DEVNULL,
-                )
-                net_devices = [
-                    u.strip() for u in net_output.decode().splitlines() if u.strip()
-                ]
-                if net_devices:
-                    udid = net_devices[0]
-        except subprocess.CalledProcessError:
-            pass
+        device = get_connected_device()
+        udid = device.get("udid", "")
 
         if not udid:
             dialog = Gtk.MessageDialog(
@@ -2209,10 +1820,10 @@ class DeviceListWindow(Handy.Window):
                 flags=0,
                 message_type=Gtk.MessageType.INFO,
                 buttons=Gtk.ButtonsType.OK,
-                text="Success!",
+                text="WiFi Sync Enabled",
             )
             success_dialog.format_secondary_text(
-                "WiFi Sync enabled successfully.\n"
+                "WiFi sync was enabled successfully.\n\n"
                 "You may need to unplug the USB cable for it to switch to Wi-Fi mode."
             )
             success_dialog.run()
@@ -3057,15 +2668,35 @@ def main():
     SETTINGS = load_settings()
     log_info(f"Settings loaded: startup_mode={SETTINGS.get('startup_mode')}")
 
-    # Check if althea is already running
-    if is_process_running("main.py", ignore_pid=os.getpid()):
+    # Check if althea is already running using a PID file in altheapath
+    pid_file = os.path.join(altheapath, "althea.pid")
+    other_instance_running = False
+    try:
+        if os.path.exists(pid_file):
+            with open(pid_file, "r") as f:
+                existing_pid_str = f.read().strip()
+            if existing_pid_str.isdigit():
+                existing_pid = int(existing_pid_str)
+                if existing_pid != os.getpid() and psutil.pid_exists(existing_pid):
+                    other_instance_running = True
+    except Exception as e:
+        logging.warning("Unable to check existing PID file: %s", e)
+
+    if other_instance_running:
         # If already running, just show the main window instead of starting new processes
         print("althea is already running. Showing main window...")
         openwindow(MainWindow)
         Gtk.main()
         return
 
-    # Try to create a tray indicator if AppIndicator is available.
+    # Record this process as the current althea instance
+    try:
+        with open(pid_file, "w") as f:
+            f.write(str(os.getpid()))
+    except Exception as e:
+        logging.warning("Unable to write PID file: %s", e)
+
+    # Best-effort tray indicator.
     try:
         global indicator
         indicator = appindicator.Indicator.new(
@@ -3075,17 +2706,16 @@ def main():
         )
         indicator.set_status(appindicator.IndicatorStatus.ACTIVE)
         indicator.set_menu(menu())
-        indicator.set_status(appindicator.IndicatorStatus.PASSIVE)
-    except Exception:
-        indicator = None
+    except Exception as e:
+        log_info(f"Tray indicator unavailable: {e!r}")
 
+    Handy.init()
     if connectioncheck():
         openwindow(SplashScreen)
     else:
         markup_text = "althea is unable to connect to the Internet.\nPlease connect to the Internet and restart althea."
         pixbuf_icon = "network-wireless-no-route-symbolic"
         Oops(markup_text, pixbuf_icon)
-    Handy.init()
     Gtk.main()
 
 
