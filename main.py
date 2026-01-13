@@ -3,20 +3,15 @@ import sys
 import os
 import errno
 from shutil import rmtree
-import json
 import urllib.request
 from urllib.request import urlopen
-import urllib.parse
 import requests
 import subprocess
-import signal
 import threading
 import keyring
 import re
-import shlex
 import time
 from time import sleep
-import platform
 from packaging import version
 import psutil
 import logging
@@ -24,7 +19,6 @@ import logging
 from althea_app.gi import (
     Gtk,
     GLib,
-    GObject,
     Handy,
     GdkPixbuf,
     Notify,
@@ -202,6 +196,12 @@ def paircheck():
 
 
 def altstoreinstall(_):
+    # Ensure this flow always installs AltStore, not the last selected IPA.
+    global PATH
+    global login_or_file_chooser
+    PATH = AltStore
+    login_or_file_chooser = "login"
+
     # Always show the install queue UI for this flow.
     try:
         install_queue_manager.ensure_window()
@@ -515,8 +515,12 @@ class InstallQueueManager:
         if self._window is None:
             self._window = InstallQueueWindow(self)
         else:
+            # Avoid stealing focus on every background update (progress ticks,
+            # log refreshes, queue updates). Keep the window available without
+            # forcing it to the front.
             try:
-                self._window.present()
+                if not self._window.get_visible():
+                    self._window.show_all()
             except Exception:
                 pass
         return self._window
